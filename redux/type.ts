@@ -8,3 +8,5 @@ export type AppDispatch = Dispatch<ActionType<any>>;
 export type RootState = typeof AppState;
 
 export type AppAction = ReturnType<typeof mapDispatchToProps>;
+
+export type HomeActionType = AppAction['homeAction'];

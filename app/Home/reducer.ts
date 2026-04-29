@@ -1,13 +1,13 @@
-import { ActionType, reducer } from "@/redux";
+import { ActionType } from "@/redux";
 import { homeState } from "./state";
+import { createReducer } from "@/redux/reducer";
 
-const { createReducer } = reducer;
-
-const { startGetAllMemorableMoments, stopGetAllMemorableMoments } = ActionType;
+const { start_get_all_memorable_moments, stop_get_all_memorable_moments } =
+  ActionType;
 
 const homeReducer = createReducer(homeState, (builder: any) => {
   builder
-    .addCase(startGetAllMemorableMoments, (state: any, action: any) => {
+    .addCase(start_get_all_memorable_moments, (state: any, action: any) => {
       return {
         ...state,
         stateMemorableMoments: {
@@ -15,8 +15,9 @@ const homeReducer = createReducer(homeState, (builder: any) => {
         },
       };
     })
-    .addCase(stopGetAllMemorableMoments, (state: any, action: any) => {
-      const { memorableMomentsList, isError, isEmpty, description } = action.payload;
+    .addCase(stop_get_all_memorable_moments, (state: any, action: any) => {
+      const { memorableMomentsList, isError, isEmpty, description } =
+        action.payload;
       return {
         ...state,
         memorableMoments: memorableMomentsList,

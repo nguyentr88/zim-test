@@ -9,10 +9,10 @@ const STOP_GET_ALL_MEMORABLE_MOMENTS = "STOP_GET_ALL_MEMORABLE_MOMENTS";
 // ============================= Action Creator ============================= //
 
 // Home
-export const startGetAllMemorableMoments = createAction(
+export const start_get_all_memorable_moments = createAction(
   START_GET_ALL_MEMORABLE_MOMENTS,
 );
-export const stopGetAllMemorableMoments = createAction(
+export const stop_get_all_memorable_moments = createAction(
   STOP_GET_ALL_MEMORABLE_MOMENTS,
   (
     memorableMomentsList: any[] = [],

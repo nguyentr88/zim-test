@@ -1,0 +1,23 @@
+module.exports = {
+	singleQuote: true,
+	tabWidth: 4,
+	semi: true,
+	quoteProps: 'consistent',
+	jsxSingleQuote: true,
+	trailingComma: 'none',
+	bracketSpacing: true,
+	bracketSameLine: true,
+	arrowParens: 'always',
+	requirePragma: false,
+	insertPragma: false,
+	proseWrap: 'never',
+	endOfLine: 'auto',
+	htmlWhitespaceSensitivity: 'css',
+	singleAttributePerLine: true,
+	printWidth: 120,
+	useTabs: true,
+	importOrder: ['^react', '^react-native', '^[a-zA-Z]', '^@?\\w', '^[./]'],
+	plugins: ['@trivago/prettier-plugin-sort-imports'],
+	importOrderSeparation: false,
+	importOrderSortSpecifiers: false
+};

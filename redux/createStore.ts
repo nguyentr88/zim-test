@@ -20,8 +20,7 @@ export const createStore = (appReducer: any, appState: any) => {
 
     const store: StoreType = configureStore({
         reducer: getReducer(appReducer, appState),
-        middleware: () => listMiddleware as any,
-        preloadedState: appState
+middleware: (getDefaultMiddleware) => listMiddleware.filter(m => typeof m === 'function') as any,        preloadedState: appState
     });
 
     store.asyncReducers = {};
