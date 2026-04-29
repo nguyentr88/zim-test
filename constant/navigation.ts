@@ -1,0 +1,3 @@
+export const HOME_NAVIGATOR = 'HOME_NAVIGATOR';
+export const HOME_SCREEN = 'HOME_SCREEN';
+export const TAB_NAVIGATOR = 'TAB_NAVIGATOR';
