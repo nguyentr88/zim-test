@@ -1,18 +1,21 @@
 import { DIMENSION } from '@/constant';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   View,
+  Text,
   TouchableOpacity,
   PanResponder,
   Animated,
-  AccessibilityInfo,
+  GestureResponderEvent,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 
 const ITEM_WIDTH = DIMENSION.width * 0.75;
 const CARD_HEIGHT = DIMENSION.height * 0.6;
+const MAX_TILT = 8;
+const VIDEO_UNMOUNT_DELAY = 800;
 
 interface Props {
   momentItem: any;
@@ -20,15 +23,22 @@ interface Props {
   onSeeking: (seeking: boolean) => void;
   scrollX: Animated.Value;
   index: number;
+  reduceMotion: boolean;
 }
 
-const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) => {
+const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index, reduceMotion }: Props) => {
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
   const [tempProgress, setTempProgress] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [reduceMotion, setReduceMotion] = useState(false);
   const [videoMounted, setVideoMounted] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const tiltX = useRef(new Animated.Value(0)).current;
+  const tiltY = useRef(new Animated.Value(0)).current;
+  const overlayAnim = useRef(new Animated.Value(0)).current;
+  const muteBtnScale = useRef(new Animated.Value(1)).current;
+  const expandAnim = useRef(new Animated.Value(0)).current;
 
   const barRef = useRef<View>(null);
   const barLayout = useRef({ x: 0, width: 0 });
@@ -39,26 +49,33 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
   const playerRef = useRef<any>(null);
   const onSeekingRef = useRef(onSeeking);
   const unmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTapRef = useRef(0);
 
-  useEffect(() => {
-    isActiveRef.current = isActive;
-  }, [isActive]);
-
-  useEffect(() => {
-    onSeekingRef.current = onSeeking;
-  }, [onSeeking]);
-
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-  }, [isPlaying]);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
+  useEffect(() => { onSeekingRef.current = onSeeking; }, [onSeeking]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   useEffect(() => {
     isMounted.current = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
-    return () => {
-      isMounted.current = false;
-    };
+    return () => { isMounted.current = false; };
   }, []);
+
+  useEffect(() => {
+    Animated.timing(overlayAnim, {
+      toValue: isActive ? 1 : 0,
+      duration: reduceMotion ? 0 : 300,
+      useNativeDriver: true,
+    }).start();
+    if (!isActive) setIsExpanded(false);
+  }, [isActive, reduceMotion]);
+
+  useEffect(() => {
+    Animated.timing(expandAnim, {
+      toValue: isExpanded ? 1 : 0,
+      duration: reduceMotion ? 0 : 220,
+      useNativeDriver: true,
+    }).start();
+  }, [isExpanded, reduceMotion]);
 
   useEffect(() => {
     if (isActive) {
@@ -68,19 +85,20 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
       }
       setVideoMounted(true);
     } else {
+      if (!reduceMotion) {
+        Animated.spring(tiltX, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+        Animated.spring(tiltY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+      }
       unmountTimerRef.current = setTimeout(() => {
         if (isMounted.current) {
           setVideoMounted(false);
           setProgress(0);
           setIsPlaying(false);
         }
-      }, 800);
+      }, VIDEO_UNMOUNT_DELAY);
     }
-
     return () => {
-      if (unmountTimerRef.current) {
-        clearTimeout(unmountTimerRef.current);
-      }
+      if (unmountTimerRef.current) clearTimeout(unmountTimerRef.current);
     };
   }, [isActive]);
 
@@ -90,17 +108,11 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
     p.timeUpdateEventInterval = 0.5;
   });
 
-  useEffect(() => {
-    playerRef.current = player;
-  }, [player]);
+  useEffect(() => { playerRef.current = player; }, [player]);
 
   useEffect(() => {
     if (!player || !videoMounted) return;
-    if (isActive) {
-      player.play();
-    } else {
-      player.pause();
-    }
+    isActive ? player.play() : player.pause();
   }, [isActive, player, videoMounted]);
 
   useEffect(() => {
@@ -110,33 +122,61 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
 
   useEffect(() => {
     if (!player || !videoMounted) return;
-
-    const subscriptions = [
-      player.addListener('playingChange', (event: any) => {
+    const subs = [
+      player.addListener('playingChange', (e: any) => {
         if (isMounted.current) {
-          setIsPlaying(event.isPlaying);
-          isPlayingRef.current = event.isPlaying;
+          setIsPlaying(e.isPlaying);
+          isPlayingRef.current = e.isPlaying;
         }
       }),
-      player.addListener('timeUpdate', (event: any) => {
+      player.addListener('timeUpdate', (e: any) => {
         if (isMounted.current && !isSeekingRef.current && player.duration > 0) {
-          const p = event.currentTime / player.duration;
-          if (!isNaN(p) && isFinite(p)) {
-            setProgress(Math.max(0, Math.min(1, p)));
-          }
+          const ratio = e.currentTime / player.duration;
+          if (isFinite(ratio)) setProgress(Math.max(0, Math.min(1, ratio)));
         }
       }),
     ];
-
-    return () => {
-      subscriptions.forEach((sub: any) => sub.remove());
-    };
+    return () => subs.forEach((s: any) => s.remove());
   }, [player, videoMounted]);
+
+  const handleTiltMove = useCallback((e: GestureResponderEvent) => {
+    if (!isActive || reduceMotion || isSeekingRef.current) return;
+    const nx = (e.nativeEvent.locationX / ITEM_WIDTH - 0.5) * 2;
+    const ny = (e.nativeEvent.locationY / CARD_HEIGHT - 0.5) * 2;
+    Animated.spring(tiltX, { toValue: nx * MAX_TILT, useNativeDriver: true, tension: 120, friction: 10 }).start();
+    Animated.spring(tiltY, { toValue: -ny * MAX_TILT, useNativeDriver: true, tension: 120, friction: 10 }).start();
+  }, [isActive, reduceMotion]);
+
+  const handleTiltEnd = useCallback(() => {
+    if (reduceMotion) return;
+    Animated.spring(tiltX, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+    Animated.spring(tiltY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+  }, [reduceMotion]);
+
+  const handleCardTap = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      const p = playerRef.current;
+      if (p) isPlayingRef.current ? p.pause() : p.play();
+    }
+    lastTapRef.current = now;
+  }, []);
+
+  const handleMutePress = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(muteBtnScale, { toValue: 0.8, duration: 80, useNativeDriver: true }),
+      Animated.spring(muteBtnScale, { toValue: 1, useNativeDriver: true, tension: 200, friction: 8 }),
+    ]).start();
+    setIsMuted((prev) => !prev);
+  }, []);
+
+  const handleContentPress = useCallback(() => {
+    setIsExpanded((prev) => !prev);
+  }, []);
 
   const updateSeekUI = (pageX: number) => {
     if (barLayout.current.width <= 0) return 0;
-    const relativeX = pageX - barLayout.current.x;
-    const ratio = Math.max(0, Math.min(1, relativeX / barLayout.current.width));
+    const ratio = Math.max(0, Math.min(1, (pageX - barLayout.current.x) / barLayout.current.width));
     setTempProgress(ratio);
     return ratio;
   };
@@ -153,51 +193,29 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-
       onPanResponderGrant: (evt) => {
         isSeekingRef.current = true;
         onSeekingRef.current(true);
-
         barRef.current?.measureInWindow((x, _, width) => {
           barLayout.current = { x, width };
           updateSeekUI(evt.nativeEvent.pageX);
         });
       },
-
-      onPanResponderMove: (evt) => {
-        updateSeekUI(evt.nativeEvent.pageX);
-      },
-
+      onPanResponderMove: (evt) => updateSeekUI(evt.nativeEvent.pageX),
       onPanResponderRelease: (evt) => {
         const ratio = updateSeekUI(evt.nativeEvent.pageX);
         const p = playerRef.current;
-
-        if (!p || p.duration <= 0 || !isFinite(p.duration)) {
-          cleanupSeeking();
-          return;
-        }
-
+        if (!p || p.duration <= 0 || !isFinite(p.duration)) { cleanupSeeking(); return; }
         try {
           const targetTime = ratio * p.duration;
           const wasPlaying = isPlayingRef.current;
-
           p.pause();
           setProgress(ratio);
-
           setTimeout(() => {
-            try {
-              p.currentTime = targetTime;
-            } catch (e) {
-              console.warn('Set currentTime error:', e);
-            }
-
+            try { p.currentTime = targetTime; } catch (e) { console.warn('currentTime error:', e); }
             setTimeout(() => {
               if (wasPlaying && isActiveRef.current) {
-                try {
-                  p.play();
-                } catch (e) {
-                  console.warn('Play after seek error:', e);
-                }
+                try { p.play(); } catch (e) { console.warn('play error:', e); }
               }
               cleanupSeeking();
             }, 100);
@@ -207,30 +225,43 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
           cleanupSeeking();
         }
       },
-
       onPanResponderTerminate: cleanupSeeking,
     })
   ).current;
 
   const parallaxTranslate = scrollX.interpolate({
     inputRange: [(index - 1) * ITEM_WIDTH, index * ITEM_WIDTH, (index + 1) * ITEM_WIDTH],
-    outputRange: reduceMotion ? [0, 0, 0] : [-50, 0, 50],
+    outputRange: reduceMotion ? [0, 0, 0] : [-40, 0, 40],
     extrapolate: 'clamp',
   });
 
+  const tiltXDeg = tiltX.interpolate({ inputRange: [-MAX_TILT, MAX_TILT], outputRange: [`-${MAX_TILT}deg`, `${MAX_TILT}deg`] });
+  const tiltYDeg = tiltY.interpolate({ inputRange: [-MAX_TILT, MAX_TILT], outputRange: [`-${MAX_TILT}deg`, `${MAX_TILT}deg`] });
+
+  const contentTranslateY = expandAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [reduceMotion ? 0 : 6, 0],
+  });
+
   return (
-    <View style={styles.card}>
+    <Animated.View
+      style={[
+        styles.card,
+        !reduceMotion && {
+          transform: [{ perspective: 800 }, { rotateY: tiltXDeg }, { rotateX: tiltYDeg }],
+        },
+      ]}
+      onTouchMove={handleTiltMove}
+      onTouchEnd={handleTiltEnd}
+      onTouchCancel={handleTiltEnd}
+    >
       <Animated.Image
         source={{ uri: momentItem?.thumbnailURL }}
         style={[
           styles.thumbnailBackground,
-          {
-            transform: [
-              { translateX: reduceMotion ? 0 : parallaxTranslate },
-              { scale: 1.15 },
-            ],
-          },
+          { transform: [{ translateX: reduceMotion ? 0 : parallaxTranslate }, { scale: 1.15 }] },
         ]}
+        fadeDuration={200}
       />
 
       {videoMounted && (
@@ -242,56 +273,77 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index }: Props) 
         />
       )}
 
-      {isActive && (
-        <View style={styles.uiOverlay} pointerEvents="box-none">
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.muteBtn}
-            onPress={() => setIsMuted((prev) => !prev)}
-          >
+      <Animated.View style={[styles.revealOverlay, { opacity: overlayAnim }]} pointerEvents="box-none">
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={handleContentPress}
+          style={styles.contentTouchable}
+          accessibilityRole="button"
+          accessibilityLabel={isExpanded ? 'Thu gọn nội dung' : 'Xem thêm nội dung'}
+        >
+          <View style={styles.contentHeader}>
+            <Text style={styles.titleText} numberOfLines={isExpanded ? undefined : 1}>
+              {momentItem?.title ?? ''}
+            </Text>
             <Ionicons
-              name={isMuted ? 'volume-mute' : 'volume-high'}
-              size={20}
-              color="#fff"
+              name={isExpanded ? 'chevron-down' : 'chevron-up'}
+              size={13}
+              color="rgba(255,255,255,0.6)"
             />
-          </TouchableOpacity>
+          </View>
+          <Animated.Text
+            style={[styles.captionText, { transform: [{ translateY: contentTranslateY }] }]}
+            numberOfLines={isExpanded ? undefined : 2}
+          >
+            {momentItem?.content ?? ''}
+          </Animated.Text>
+        </TouchableOpacity>
+      </Animated.View>
+
+      {isActive && (
+        <View style={styles.uiOverlay} pointerEvents="box-none" onTouchEnd={handleCardTap}>
+          <Animated.View style={[styles.muteBtn, { transform: [{ scale: muteBtnScale }] }]}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={handleMutePress}
+              accessibilityRole="button"
+              accessibilityLabel={isMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name={isMuted ? 'volume-mute' : 'volume-high'} size={20} color="#fff" />
+            </TouchableOpacity>
+          </Animated.View>
 
           {!isPlaying && player?.status === 'readyToPlay' && (
             <TouchableOpacity
               activeOpacity={0.9}
               style={styles.playBtn}
               onPress={() => player.play()}
+              accessibilityRole="button"
+              accessibilityLabel="Phát video"
             >
               <Ionicons name="play" size={55} color="rgba(255,255,255,0.9)" />
             </TouchableOpacity>
           )}
 
-          <View style={styles.seekBarWrapper} pointerEvents="box-none">
-            <View
-              ref={barRef}
-              style={styles.seekBarTrack}
-              {...seekPanResponder.panHandlers}
-            >
-              <View style={styles.trackBg} pointerEvents="none" />
+          {!isExpanded && (
+            <View style={styles.seekBarWrapper} pointerEvents="box-none">
               <View
-                style={[
-                  styles.trackFill,
-                  { width: `${(tempProgress ?? progress) * 100}%` },
-                ]}
-                pointerEvents="none"
-              />
-              <View
-                style={[
-                  styles.thumb,
-                  { left: `${(tempProgress ?? progress) * 100}%` },
-                ]}
-                pointerEvents="none"
-              />
+                ref={barRef}
+                style={styles.seekBarTrack}
+                {...seekPanResponder.panHandlers}
+                accessibilityRole="adjustable"
+                accessibilityLabel="Thanh tua video"
+              >
+                <View style={styles.trackBg} pointerEvents="none" />
+                <View style={[styles.trackFill, { width: `${(tempProgress ?? progress) * 100}%` }]} pointerEvents="none" />
+                <View style={[styles.thumb, { left: `${(tempProgress ?? progress) * 100}%` }]} pointerEvents="none" />
+              </View>
             </View>
-          </View>
+          )}
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 };
 
@@ -302,30 +354,50 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     borderRadius: 24,
     overflow: 'hidden',
-    marginHorizontal: 10,
   },
   thumbnailBackground: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
   },
   videoOverlay: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
     zIndex: 1,
+  },
+  revealOverlay: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    zIndex: 2,
+  },
+  contentTouchable: {
+    paddingHorizontal: 14,
+    paddingTop: 36,
+    paddingBottom: 72,
+  },
+  contentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginBottom: 3,
+  },
+  titleText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ffffff',
+    lineHeight: 16,
+  },
+  captionText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
+    fontWeight: '400',
+    lineHeight: 15,
   },
   uiOverlay: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 2,
+    top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 3,
   },
   muteBtn: {
     position: 'absolute',
@@ -342,7 +414,7 @@ const styles = StyleSheet.create({
   },
   seekBarWrapper: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 6,
     width: '100%',
     height: 60,
     paddingHorizontal: 20,
