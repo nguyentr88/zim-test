@@ -1,4 +1,4 @@
-import { ActionType } from "@/redux";
+import * as ActionType from "@/redux/actionType";
 import { homeState } from "./state";
 import { createReducer } from "@/redux/reducer";
 

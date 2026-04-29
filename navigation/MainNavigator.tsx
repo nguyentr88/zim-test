@@ -7,7 +7,7 @@ const Stack = createNativeStackNavigator();
 
 export default function MainNavigator() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, gestureEnabled: false }}>
       <Stack.Screen name={TAB_NAVIGATOR} component={TabNavigator} />
     </Stack.Navigator>
   );

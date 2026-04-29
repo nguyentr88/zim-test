@@ -3,8 +3,7 @@ import thunk from 'redux-thunk';
 // @ts-ignore
 import logger from 'redux-logger';
 
-const listMiddleware: Array<any> = [thunk];
-// @ts-ignore
+const listMiddleware: Array<any> = [];
 if (__DEV__) {
     listMiddleware.push(logger);
 }
@@ -20,7 +19,11 @@ export const createStore = (appReducer: any, appState: any) => {
 
     const store: StoreType = configureStore({
         reducer: getReducer(appReducer, appState),
-middleware: (getDefaultMiddleware) => listMiddleware.filter(m => typeof m === 'function') as any,        preloadedState: appState
+        middleware: (getDefaultMiddleware) => 
+            getDefaultMiddleware({
+                serializableCheck: false,
+            }).concat(listMiddleware),
+        preloadedState: appState
     });
 
     store.asyncReducers = {};

@@ -2,7 +2,7 @@ import Config from 'react-native-config';
 
 const {
     HOST = 'https://api.example.com/',
-} = Config;
+} = Config || {};
 
 const API = 'api/';
 

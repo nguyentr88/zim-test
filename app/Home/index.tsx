@@ -1,14 +1,17 @@
 import { ScreenWrapper } from "@/components";
 import React, { useEffect } from "react";
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { connect } from "@/redux/reducer";
 import { mapDispatchToProps, type AppAction, type RootState } from "@/redux";
+import { MomentItem, MomentList } from "./components";
+import { DIMENSION } from "@/constant";
 
-interface HomeProps {}
+interface HomeProps { }
 type ReduxStateProps = ReturnType<typeof mapStateToProps>;
 
 const HomeScreen = ({
   homeAction,
+  momentsData
 }: HomeProps & ReduxStateProps & AppAction) => {
   const onGetAllMemorableMoments = () => {
     homeAction.getAllStore();
@@ -20,13 +23,19 @@ const HomeScreen = ({
 
   return (
     <ScreenWrapper>
-      <View style={styles.container}></View>
+      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainerStyle}>
+        <MomentList 
+          momentsData={momentsData}
+        />
+      </ScrollView>
     </ScreenWrapper>
   );
 };
 
 const mapStateToProps = function (state: RootState) {
-  return {};
+  return {
+    momentsData: state.homeReducer.memorableMoments,
+  };
 };
 
 export default connect(mapStateToProps, mapDispatchToProps)(HomeScreen);
@@ -34,6 +43,10 @@ export default connect(mapStateToProps, mapDispatchToProps)(HomeScreen);
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#1F1F1F",
   },
+  contentContainerStyle: {
+    alignItems: 'center',
+    paddingBottom: DIMENSION.heightBottomSafe + 8
+  }
 });
