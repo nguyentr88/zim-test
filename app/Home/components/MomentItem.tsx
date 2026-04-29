@@ -1,175 +1,294 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, PanResponder } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
-import { Stack } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { DIMENSION } from '@/constant';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { StyleSheet, View, TouchableOpacity, PanResponder, Image } from 'react-native';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { Ionicons } from '@expo/vector-icons';
 
-const { width, height } = DIMENSION;
-const VIDEO_WIDTH = width * 0.8;
-const VIDEO_HEIGHT = height * 0.7;
-const THUMB_SIZE = 14;
-const TRACK_HEIGHT = 4;
+const ITEM_WIDTH = DIMENSION.width * 0.75;
 
-const MomentItem = ({ momentItem }: { momentItem: any }) => {
-  const player = useVideoPlayer(momentItem?.videoURL, (p) => {
-    p.loop = true;
-    p.play();
-  });
+const CARD_HEIGHT = DIMENSION.height * 0.6;
 
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [progress, setProgress] = useState(0);
+interface Props {
+	momentItem: any;
 
-  const barWidthRef = useRef(0);
-  const isSeekingRef = useRef(false);
+	isActive: boolean;
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (isSeekingRef.current) return;
-      const dur = player.duration;
-      if (dur > 0) setProgress(player.currentTime / dur);
-      setIsPlaying(player.playing);
-    }, 150);
-    return () => clearInterval(id);
-  }, [player]);
+	onSeeking: (seeking: boolean) => void;
+}
 
-  const updateProgress = (locationX: number) => {
-    const ratio = Math.min(Math.max(locationX / barWidthRef.current, 0), 1);
-    setProgress(ratio);
-    return ratio;
-  };
+const MomentItem = ({ momentItem, isActive, onSeeking }: Props) => {
+	const [isMuted, setIsMuted] = useState(false);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        isSeekingRef.current = true;
-        updateProgress(e.nativeEvent.locationX);
-      },
-      onPanResponderMove: (e) => {
-        updateProgress(e.nativeEvent.locationX);
-      },
-      onPanResponderRelease: (e) => {
-        const ratio = updateProgress(e.nativeEvent.locationX);
-        if (player.duration > 0) {
-          player.currentTime = ratio * player.duration;
-        }
-        setTimeout(() => { isSeekingRef.current = false; }, 150);
-      },
-      onPanResponderTerminate: () => { isSeekingRef.current = false; },
-    })
-  ).current;
+	const [progress, setProgress] = useState(0);
 
-  return (
-    <>
-      <Stack.Screen options={{ headerShown: false }} />
-      
-      <View style={styles.videoContainer}>
-        <VideoView
-          style={styles.video}
-          player={player}
-          contentFit="cover"
-          nativeControls={false}
-        />
+	const [tempProgress, setTempProgress] = useState<number | null>(null);
 
-        <TouchableOpacity 
-          style={styles.playBtn} 
-          onPress={() => player.playing ? player.pause() : player.play()}
-          activeOpacity={0.7}
-        >
-          <Ionicons name={isPlaying ? 'pause' : 'play'} size={44} color="#fff" />
-        </TouchableOpacity>
+	const [isPlaying, setIsPlaying] = useState(false);
 
-        <View style={styles.seekBarWrapper}>
-          <View
-            style={styles.seekBarTrack}
-            onLayout={(e) => (barWidthRef.current = e.nativeEvent.layout.width)}
-            {...panResponder.panHandlers}
-          >
-            <View style={styles.trackBackground} pointerEvents="none" />
-            <View 
-              style={[styles.seekBarFill, { width: `${progress * 100}%` }]} 
-              pointerEvents="none" 
-            />
-            <View 
-              style={[styles.thumb, { left: `${progress * 100}%` }]} 
-              pointerEvents="none" 
-            />
-          </View>
-        </View>
-      </View>
-    </>
-  );
+	const barRef = useRef<View>(null);
+
+	const barLayout = useRef({ x: 0, width: 0 });
+
+	const isSeekingRef = useRef(false);
+
+	const player = useVideoPlayer(isActive ? momentItem?.videoURL : null, (p) => {
+		p.loop = true;
+
+		p.muted = isMuted;
+
+		p.play();
+	});
+
+	const updateSeek = (pageX: number) => {
+		if (barLayout.current.width > 0) {
+			const relativeX = pageX - barLayout.current.x;
+
+			const ratio = Math.min(Math.max(relativeX / barLayout.current.width, 0), 1);
+
+			setTempProgress(ratio);
+
+			return ratio;
+		}
+
+		return 0;
+	};
+
+	const seekPanResponder = useMemo(
+		() =>
+			PanResponder.create({
+				onStartShouldSetPanResponder: () => true,
+
+				onMoveShouldSetPanResponder: () => true,
+
+				onPanResponderGrant: (evt, gestureState) => {
+					isSeekingRef.current = true;
+
+					onSeeking(true);
+
+					barRef.current?.measureInWindow((x, y, width) => {
+						barLayout.current = { x, width };
+
+						updateSeek(gestureState.x0);
+					});
+				},
+
+				onPanResponderMove: (evt, gestureState) => {
+					updateSeek(gestureState.moveX);
+				},
+
+				onPanResponderRelease: (evt, gestureState) => {
+					const ratio = updateSeek(gestureState.moveX);
+
+					if (player && isActive && player.duration > 0) {
+						player.currentTime = ratio * player.duration;
+
+						setProgress(ratio);
+					}
+
+					setTempProgress(null);
+
+					setTimeout(() => {
+						isSeekingRef.current = false;
+
+						onSeeking(false);
+					}, 200);
+				},
+
+				onPanResponderTerminate: () => {
+					setTempProgress(null);
+
+					isSeekingRef.current = false;
+
+					onSeeking(false);
+				}
+			}),
+		[player, isActive, onSeeking]
+	);
+
+	useEffect(() => {
+		if (!isActive || !player) return;
+
+		const id = setInterval(() => {
+			if (!isSeekingRef.current && player.duration > 0) {
+				setProgress(player.currentTime / player.duration);
+
+				setIsPlaying(player.playing);
+			}
+		}, 500);
+
+		return () => clearInterval(id);
+	}, [player, isActive]);
+
+	return (
+		<View style={styles.card}>
+			<Image
+				source={{ uri: momentItem?.thumbnailURL }}
+				style={styles.thumbnailBackground}
+				resizeMode='cover'
+			/>
+
+			{isActive && player && (
+				<VideoView
+					style={styles.videoOverlay}
+					player={player}
+					contentFit='cover'
+					nativeControls={false}
+				/>
+			)}
+
+			{isActive && (
+				<View
+					style={styles.uiOverlay}
+					pointerEvents='box-none'>
+					<TouchableOpacity
+						style={styles.muteBtn}
+						onPress={() => setIsMuted(!isMuted)}>
+						<Ionicons
+							name={isMuted ? 'volume-mute' : 'volume-high'}
+							size={20}
+							color='#fff'
+						/>
+					</TouchableOpacity>
+
+					{!isPlaying && (
+						<TouchableOpacity
+							style={styles.playBtn}
+							onPress={() => player?.play()}>
+							<Ionicons
+								name='play'
+								size={55}
+								color='rgba(255,255,255,0.9)'
+							/>
+						</TouchableOpacity>
+					)}
+
+					<View
+						style={styles.seekBarWrapper}
+						pointerEvents='box-none'>
+						<View
+							ref={barRef}
+							style={styles.seekBarTrack}
+							{...seekPanResponder.panHandlers}>
+							<View
+								style={styles.trackBg}
+								pointerEvents='none'
+							/>
+
+							<View
+								style={[styles.trackFill, { width: `${(tempProgress ?? progress) * 100}%` }]}
+								pointerEvents='none'
+							/>
+
+							<View
+								style={[styles.thumb, { left: `${(tempProgress ?? progress) * 100}%` }]}
+								pointerEvents='none'
+							/>
+						</View>
+					</View>
+				</View>
+			)}
+		</View>
+	);
 };
 
-export default MomentItem;
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    paddingTop: 50,
-  },
-  videoContainer: {
-    width: VIDEO_WIDTH,
-    height: VIDEO_HEIGHT,
-    backgroundColor: '#111',
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  video: {
-    flex: 1,
-  },
-  playBtn: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -22 }, { translateY: -22 }],
-    zIndex: 10,
-  },
-  seekBarWrapper: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 40,
-    paddingHorizontal: 12,
-    justifyContent: 'center',
-    zIndex: 20,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  seekBarTrack: {
-    height: 20,
-    width: '100%',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  trackBackground: {
-    height: TRACK_HEIGHT,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 2,
-    width: '100%',
-  },
-  seekBarFill: {
-    position: 'absolute',
-    height: TRACK_HEIGHT,
-    backgroundColor: '#fff',
-    borderRadius: 2,
-    left: 0,
-  },
-  thumb: {
-    position: 'absolute',
-    width: THUMB_SIZE,
-    height: THUMB_SIZE,
-    borderRadius: THUMB_SIZE / 2,
-    backgroundColor: '#fff',
-    marginLeft: -(THUMB_SIZE / 2),
-  },
-  contentArea: {
-    width: VIDEO_WIDTH,
-    marginTop: 20,
-  }
+	card: {
+		width: ITEM_WIDTH,
+
+		height: CARD_HEIGHT,
+
+		backgroundColor: '#000',
+
+		borderRadius: 24,
+
+		overflow: 'hidden',
+
+		marginHorizontal: 10
+	},
+
+	thumbnailBackground: { ...StyleSheet.absoluteFillObject },
+
+	videoOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
+
+	uiOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 2 },
+
+	muteBtn: {
+		position: 'absolute',
+
+		top: 15,
+
+		left: 15,
+
+		backgroundColor: 'rgba(0,0,0,0.5)',
+
+		padding: 10,
+
+		borderRadius: 25
+	},
+
+	playBtn: {
+		position: 'absolute',
+
+		top: '45%',
+
+		left: '42%'
+	},
+
+	seekBarWrapper: {
+		position: 'absolute',
+
+		bottom: 0,
+
+		width: '100%',
+
+		height: 60,
+
+		paddingHorizontal: 20,
+
+		justifyContent: 'center'
+	},
+
+	seekBarTrack: {
+		height: 40,
+
+		width: '100%',
+
+		justifyContent: 'center',
+
+		backgroundColor: 'transparent'
+	},
+
+	trackBg: {
+		height: 6,
+
+		backgroundColor: 'rgba(255,255,255,0.3)',
+
+		borderRadius: 3
+	},
+
+	trackFill: {
+		height: 6,
+
+		backgroundColor: '#fff',
+
+		position: 'absolute',
+
+		borderRadius: 3
+	},
+
+	thumb: {
+		position: 'absolute',
+
+		width: 18,
+
+		height: 18,
+
+		borderRadius: 9,
+
+		backgroundColor: '#fff',
+
+		marginLeft: -9
+	}
 });
+
+export default MomentItem;
