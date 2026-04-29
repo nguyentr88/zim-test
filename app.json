@@ -44,6 +44,17 @@
     ],
     "experiments": {
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "436f8805-4efa-4ded-a15a-add4c25f108e"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/436f8805-4efa-4ded-a15a-add4c25f108e"
     }
   }
 }
