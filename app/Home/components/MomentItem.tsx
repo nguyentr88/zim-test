@@ -16,17 +16,24 @@ const ITEM_WIDTH = DIMENSION.width * 0.75;
 const CARD_HEIGHT = DIMENSION.height * 0.6;
 const MAX_TILT = 8;
 const VIDEO_UNMOUNT_DELAY = 800;
+const LONG_PRESS_DELAY = 350;
+const DOUBLE_TAP_DELAY = 300;
+const MOVE_THRESHOLD = 8;
+const LEFT_ZONE = 0.33;
+const RIGHT_ZONE = 0.67;
+const SEEK_BAR_HEIGHT = 70;
 
 interface Props {
   momentItem: any;
   isActive: boolean;
   onSeeking: (seeking: boolean) => void;
+  onNavigate: (direction: 'prev' | 'next') => void;
   scrollX: Animated.Value;
   index: number;
   reduceMotion: boolean;
 }
 
-const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index, reduceMotion }: Props) => {
+const MomentItem = ({ momentItem, isActive, onSeeking, onNavigate, scrollX, index, reduceMotion }: Props) => {
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
   const [tempProgress, setTempProgress] = useState<number | null>(null);
@@ -48,12 +55,22 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index, reduceMot
   const isActiveRef = useRef(isActive);
   const playerRef = useRef<any>(null);
   const onSeekingRef = useRef(onSeeking);
+  const onNavigateRef = useRef(onNavigate);
   const unmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef(0);
 
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPressActiveRef = useRef(false);
+  const touchStartXRef = useRef(0);
+  const touchStartYRef = useRef(0);
+  const touchMovedRef = useRef(false);
+  const isExpandedRef = useRef(isExpanded);
+
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
   useEffect(() => { onSeekingRef.current = onSeeking; }, [onSeeking]);
+  useEffect(() => { onNavigateRef.current = onNavigate; }, [onNavigate]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -139,28 +156,102 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index, reduceMot
     return () => subs.forEach((s: any) => s.remove());
   }, [player, videoMounted]);
 
-  const handleTiltMove = useCallback((e: GestureResponderEvent) => {
+  const resetTilt = useCallback(() => {
+    if (reduceMotion) return;
+    Animated.spring(tiltX, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+    Animated.spring(tiltY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+  }, [reduceMotion, tiltX, tiltY]);
+
+  const stopFastForward = useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    try { p.playbackRate = 1; } catch { }
+  }, []);
+
+  const handleTouchStart = useCallback((e: GestureResponderEvent) => {
+    touchStartXRef.current = e.nativeEvent.locationX;
+    touchStartYRef.current = e.nativeEvent.locationY;
+    touchMovedRef.current = false;
+    isLongPressActiveRef.current = false;
+
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      if (!touchMovedRef.current && !isSeekingRef.current) {
+        isLongPressActiveRef.current = true;
+        const p = playerRef.current;
+        if (p) try { p.playbackRate = 2; } catch { }
+      }
+    }, LONG_PRESS_DELAY);
+  }, []);
+
+  const handleTouchMove = useCallback((e: GestureResponderEvent) => {
+    const dx = Math.abs(e.nativeEvent.locationX - touchStartXRef.current);
+    const dy = Math.abs(e.nativeEvent.locationY - touchStartYRef.current);
+    if (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD) {
+      touchMovedRef.current = true;
+      if (longPressTimerRef.current && !isLongPressActiveRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    }
+
     if (!isActive || reduceMotion || isSeekingRef.current) return;
     const nx = (e.nativeEvent.locationX / ITEM_WIDTH - 0.5) * 2;
     const ny = (e.nativeEvent.locationY / CARD_HEIGHT - 0.5) * 2;
     Animated.spring(tiltX, { toValue: nx * MAX_TILT, useNativeDriver: true, tension: 120, friction: 10 }).start();
     Animated.spring(tiltY, { toValue: -ny * MAX_TILT, useNativeDriver: true, tension: 120, friction: 10 }).start();
-  }, [isActive, reduceMotion]);
+  }, [isActive, reduceMotion, tiltX, tiltY]);
 
-  const handleTiltEnd = useCallback(() => {
-    if (reduceMotion) return;
-    Animated.spring(tiltX, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
-    Animated.spring(tiltY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
-  }, [reduceMotion]);
+  const handleTouchEnd = useCallback((_e: GestureResponderEvent) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
 
-  const handleCardTap = useCallback(() => {
+    resetTilt();
+
+    if (isLongPressActiveRef.current) {
+      isLongPressActiveRef.current = false;
+      stopFastForward();
+      return;
+    }
+
+    if (!isActive || touchMovedRef.current || isSeekingRef.current) return;
+
+    const touchY = touchStartYRef.current;
+    if (!isExpandedRef.current && touchY > CARD_HEIGHT - SEEK_BAR_HEIGHT) return;
+
     const now = Date.now();
-    if (now - lastTapRef.current < 300) {
+    const isDoubleTap = now - lastTapRef.current < DOUBLE_TAP_DELAY;
+    lastTapRef.current = now;
+
+    if (isDoubleTap) {
+      onNavigateRef.current('prev');
+      return;
+    }
+
+    const ratio = touchStartXRef.current / ITEM_WIDTH;
+    if (ratio < LEFT_ZONE) {
+      onNavigateRef.current('prev');
+    } else if (ratio > RIGHT_ZONE) {
+      onNavigateRef.current('next');
+    } else {
       const p = playerRef.current;
       if (p) isPlayingRef.current ? p.pause() : p.play();
     }
-    lastTapRef.current = now;
-  }, []);
+  }, [isActive, resetTilt, stopFastForward]);
+
+  const handleTouchCancel = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (isLongPressActiveRef.current) {
+      isLongPressActiveRef.current = false;
+      stopFastForward();
+    }
+    resetTilt();
+  }, [resetTilt, stopFastForward]);
 
   const handleMutePress = useCallback(() => {
     Animated.sequence([
@@ -251,9 +342,10 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index, reduceMot
           transform: [{ perspective: 800 }, { rotateY: tiltXDeg }, { rotateX: tiltYDeg }],
         },
       ]}
-      onTouchMove={handleTiltMove}
-      onTouchEnd={handleTiltEnd}
-      onTouchCancel={handleTiltEnd}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
     >
       <Animated.Image
         source={{ uri: momentItem?.thumbnailURL }}
@@ -301,7 +393,7 @@ const MomentItem = ({ momentItem, isActive, onSeeking, scrollX, index, reduceMot
       </Animated.View>
 
       {isActive && (
-        <View style={styles.uiOverlay} pointerEvents="box-none" onTouchEnd={handleCardTap}>
+        <View style={styles.uiOverlay} pointerEvents="box-none">
           <Animated.View style={[styles.muteBtn, { transform: [{ scale: muteBtnScale }] }]}>
             <TouchableOpacity
               activeOpacity={0.8}

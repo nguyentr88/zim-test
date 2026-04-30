@@ -26,6 +26,7 @@ const MomentList = ({ momentsData }: MomentListProps) => {
     const scrollX = useRef(new Animated.Value(0)).current;
     const flatListRef = useRef<any>(null);
     const [activeIndex, setActiveIndex] = useState(0);
+    const activeIndexRef = useRef(0);
     const [isListScrollEnabled, setIsListScrollEnabled] = useState(true);
     const [reduceMotion, setReduceMotion] = useState(false);
 
@@ -40,7 +41,9 @@ const MomentList = ({ momentsData }: MomentListProps) => {
     const onViewableItemsChanged = useRef(
         ({ viewableItems }: { viewableItems: ViewToken[] }) => {
             if (viewableItems.length > 0) {
-                setActiveIndex(viewableItems[0].index ?? 0);
+                const idx = viewableItems[0].index ?? 0;
+                setActiveIndex(idx);
+                activeIndexRef.current = idx;
             }
         }
     ).current;
@@ -48,6 +51,18 @@ const MomentList = ({ momentsData }: MomentListProps) => {
     const handleSeeking = useCallback((seeking: boolean) => {
         setIsListScrollEnabled(!seeking);
     }, []);
+
+    const handleNavigate = useCallback(
+        (direction: 'prev' | 'next') => {
+            const current = activeIndexRef.current;
+            const next = direction === 'prev' ? current - 1 : current + 1;
+            if (next < 0 || next >= momentsData.length) return;
+            flatListRef.current?.scrollToOffset({ offset: next * ITEM_TOTAL_WIDTH, animated: true });
+            setActiveIndex(next);
+            activeIndexRef.current = next;
+        },
+        [momentsData.length]
+    );
 
     const renderItem = useCallback(
         ({ item, index }: { item: any; index: number }) => {
@@ -88,6 +103,7 @@ const MomentList = ({ momentsData }: MomentListProps) => {
                         momentItem={item}
                         isActive={index === activeIndex}
                         onSeeking={handleSeeking}
+                        onNavigate={handleNavigate}
                         scrollX={scrollX}
                         index={index}
                         reduceMotion={reduceMotion}
@@ -95,7 +111,7 @@ const MomentList = ({ momentsData }: MomentListProps) => {
                 </Animated.View>
             );
         },
-        [activeIndex, reduceMotion, scrollX, handleSeeking]
+        [activeIndex, reduceMotion, scrollX, handleSeeking, handleNavigate]
     );
 
     return (
